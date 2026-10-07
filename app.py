@@ -109,8 +109,9 @@ def init_db():
                   buying_power REAL, 
                   net_liquidation REAL)''')
     
+    # ค่าตั้งต้นเริ่มต้นถ้ายังไม่มีข้อมูล
     c.execute('''INSERT OR IGNORE INTO account_info (id, cash_balance, buying_power, net_liquidation) 
-                 VALUES (1, 1000.00, 4000.00, 1000.00)''')
+                 VALUES (1, 2000.00, 8000.00, 2000.00)''')
     conn.commit()
     conn.close()
 
@@ -123,9 +124,20 @@ def get_db_account_capital():
         c.execute("SELECT cash_balance FROM account_info WHERE id=1")
         row = c.fetchone()
         conn.close()
-        return float(row[0]) if row else 1000.00
+        return float(row[0]) if row else 2000.00
     except:
-        return 1000.00
+        return 2000.00
+
+def update_db_account_capital(new_capital):
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("UPDATE account_info SET cash_balance = ?, buying_power = ?, net_liquidation = ? WHERE id = 1", 
+                  (new_capital, new_capital * 4, new_capital))
+        conn.commit()
+        conn.close()
+    except:
+        pass
 
 def get_all_positions():
     if not os.path.exists(DB_FILE):
@@ -176,7 +188,12 @@ def fetch_live_market_data(symbols):
 # --- Sidebar ควบคุมระบบ ---
 st.sidebar.markdown("### 🎛️ Terminal Control Center")
 current_capital = get_db_account_capital()
-account_capital = st.sidebar.number_input("Account Capital ($) [Webull Live]", value=float(current_capital), step=100.0)
+
+# ช่องกรอกปรับยอดเงิน และบันทึกลง DB ทันทีเมื่อมีการเปลี่ยนแปลง
+new_capital_input = st.sidebar.number_input("Account Capital ($) [Webull Live]", value=float(current_capital), step=100.0)
+if new_capital_input != current_capital:
+    update_db_account_capital(new_capital_input)
+    current_capital = new_capital_input
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📡 Watchlist File")
@@ -196,7 +213,7 @@ st.divider()
 st.markdown(f"""
     <div class="dime-header-card">
         <div class="dime-label">มูลค่าพอร์ตเงินสดรวม (Webull Live Feed)</div>
-        <div class="dime-main-value">${account_capital:,.2f} USD</div>
+        <div class="dime-main-value">${current_capital:,.2f} USD</div>
         <div class="dime-sub">🟢 เชื่อมต่อข้อมูลตลาดหลักทรัพย์แบบเรียลไทม์ (ปลอดภัย ไร้ความเสี่ยง)</div>
     </div>
 """, unsafe_allow_html=True)
