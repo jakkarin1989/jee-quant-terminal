@@ -3,17 +3,18 @@ import sqlite3
 import pandas as pd
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import time
 import yfinance as yf
 
 # --- ตั้งค่าหน้าจอแบบ Wide Mode ---
 st.set_page_config(
-    page_title="Jee Sovereign Quant Terminal",
+    page_title="Jee Sovereign Quant Terminal (Dime UI Style)",
     page_icon="⚡",
     layout="wide"
 )
 
-# --- Custom CSS สไตล์ Dime คลีนๆ สบายตา ---
+# --- Custom CSS แต่ง UI ให้สะอาด สบายตา สไตล์แอป Dime ---
 st.markdown("""
 <style>
     .main {
@@ -58,7 +59,7 @@ st.markdown("""
         border: 1px solid #1f2937;
         border-radius: 12px;
         padding: 15px;
-        height: 320px;
+        height: 350px;
         overflow-y: auto;
         font-family: monospace;
         color: #10b981;
@@ -105,43 +106,26 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS account_info 
                  (id INTEGER PRIMARY KEY CHECK (id = 1), 
                   cash_balance REAL, 
+                  buying_power REAL, 
                   net_liquidation REAL)''')
     
-    # ตรวจสอบและเพิ่มคอลัมน์ initial_capital อัตโนมัติกรณีที่ฐานข้อมูลเดิมยังไม่มี
-    try:
-        c.execute("ALTER TABLE account_info ADD COLUMN initial_capital REAL DEFAULT 2000.00")
-    except sqlite3.OperationalError:
-        pass # ถ้ามีคอลัมน์อยู่แล้วให้ข้ามผ่านไปได้เลย
-    
-    c.execute('''INSERT OR IGNORE INTO account_info (id, cash_balance, initial_capital, net_liquidation) 
-                 VALUES (1, 2000.00, 2000.00, 2000.00)''')
+    c.execute('''INSERT OR IGNORE INTO account_info (id, cash_balance, buying_power, net_liquidation) 
+                 VALUES (1, 1000.00, 4000.00, 1000.00)''')
     conn.commit()
     conn.close()
 
 init_db()
 
-def get_db_account_info():
+def get_db_account_capital():
     try:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        c.execute("SELECT cash_balance, initial_capital FROM account_info WHERE id=1")
+        c.execute("SELECT cash_balance FROM account_info WHERE id=1")
         row = c.fetchone()
         conn.close()
-        if row:
-            return float(row[0]), float(row[1] if row[1] is not None else row[0])
+        return float(row[0]) if row else 1000.00
     except:
-        pass
-    return 2000.00, 2000.00
-
-def update_db_account_capital(new_capital: float):
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("UPDATE account_info SET cash_balance = ?, initial_capital = ?, net_liquidation = ? WHERE id = 1", (new_capital, new_capital, new_capital))
-        conn.commit()
-        conn.close()
-    except:
-        pass
+        return 1000.00
 
 def get_all_positions():
     if not os.path.exists(DB_FILE):
@@ -154,10 +138,12 @@ def get_all_positions():
     except:
         return pd.DataFrame()
 
-# Session State สำหรับเก็บประวัติ Log
+# ดึงเวลาไทยเริ่มต้น
+thai_now = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S")
+
 if "log_lines" not in st.session_state:
     st.session_state.log_lines = [
-        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INIT] เริ่มต้นระบบมอนิเตอร์ Watchlist จำนวน {len(WATCHLIST)} ตัว..."
+        f"[{thai_now}] [INIT] เริ่มต้นระบบมอนิเตอร์ Watchlist จำนวน {len(WATCHLIST)} ตัว..."
     ]
 
 @st.cache_data(ttl=30)
@@ -189,12 +175,8 @@ def fetch_live_market_data(symbols):
 
 # --- Sidebar ควบคุมระบบ ---
 st.sidebar.markdown("### 🎛️ Terminal Control Center")
-current_capital, initial_cap = get_db_account_info()
+current_capital = get_db_account_capital()
 account_capital = st.sidebar.number_input("Account Capital ($) [Webull Live]", value=float(current_capital), step=100.0)
-
-if account_capital != current_capital:
-    update_db_account_capital(account_capital)
-    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📡 Watchlist File")
@@ -210,28 +192,16 @@ st.markdown("## 📊 สินทรัพย์ของฉัน & ควบ�
 st.markdown("ระบบมอนิเตอร์ราคาและวิเคราะห์เชิงปริมาณสไตล์ Dime! | Live Streaming Active")
 st.divider()
 
-# --- คำนวณกำไรขาดทุนแบบถูกต้อง ---
-profit_loss_usd = account_capital - initial_cap
-profit_loss_pct = (profit_loss_usd / initial_cap) * 100 if initial_cap > 0 else 0.0
-
-if profit_loss_usd > 0:
-    pl_color = "#10b981"
-    pl_text = f"+{profit_loss_pct:.2f}% (+${profit_loss_usd:,.2f} USD)"
-elif profit_loss_usd < 0:
-    pl_color = "#ef4444"
-    pl_text = f"{profit_loss_pct:.2f}% (-${abs(profit_loss_usd):,.2f} USD)"
-else:
-    pl_color = "#9ca3af"
-    pl_text = "0.00% ($0.00 USD) ทุนเริ่มต้นพอดี"
-
+# --- การ์ดแสดงมูลค่าทรัพย์สินรวม ---
 st.markdown(f"""
     <div class="dime-header-card">
         <div class="dime-label">มูลค่าพอร์ตเงินสดรวม (Webull Live Feed)</div>
         <div class="dime-main-value">${account_capital:,.2f} USD</div>
-        <div class="dime-sub" style="color: {pl_color};">ผลกำไรสุทธิ: {pl_text} (เทียบกับทุนเริ่มต้น ${initial_cap:,.2f})</div>
+        <div class="dime-sub">🟢 เชื่อมต่อข้อมูลตลาดหลักทรัพย์แบบเรียลไทม์ (ปลอดภัย ไร้ความเสี่ยง)</div>
     </div>
 """, unsafe_allow_html=True)
 
+# --- การ์ดย่อย 2 คอลัมน์ ---
 col_sub1, col_sub2 = st.columns(2)
 with col_sub1:
     df_positions = get_all_positions()
@@ -254,6 +224,7 @@ with col_sub2:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+# --- Tabs หลัก ---
 tab1, tab2, tab3 = st.tabs([
     "📈 รายชื่อหุ้น & ราคาเรียลไทม์", 
     "🤖 บันทึกการทำงาน (Live Logs)", 
@@ -268,14 +239,18 @@ with tab1:
 
 with tab2:
     st.subheader("🔍 Auto-Scanner & Live Feed Logs")
-    st.markdown("บันทึกการทำงานสแกนตลาด ข้อความจะไหลต่อยอดขึ้นด้านบนเรื่อยๆ คล้ายหน้าต่างคำสั่ง:")
+    st.markdown(f"บันทึกการทำงานสแกนตลาด ข้อความจะไหลต่อยอดขึ้นด้านบนเรื่อยๆ (เช็กครบทั้ง {len(WATCHLIST)} ตัว / เวลาไทยตรงเป๊ะ):")
     
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # อัปเดต Log เป็นเวลาไทย (Asia/Bangkok)
+    now_str = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S")
     st.session_state.log_lines.append(f"[{now_str}] [SCAN] ดึงข้อมูลราคา Watchlist ทั้ง {len(WATCHLIST)} ตัวเรียบร้อย")
-    for s in WATCHLIST[:4]:
+    
+    # วนลูปโชว์ครบทุกตัวใน Watchlist จริงๆ
+    for s in WATCHLIST:
         st.session_state.log_lines.append(f"[{now_str}]   ├─ [{s}] ตรวจสอบแนวโน้ม EMA 9/21/50/200 บน TF 4h / Day [ปกติ]")
     
-    log_html = "<br>".join(st.session_state.log_lines[-40:])
+    # แสดงผลกล่อง Scrollable Log (เก็บประวัติล่าสุด 150 บรรทัด)
+    log_html = "<br>".join(st.session_state.log_lines[-150:])
     st.markdown(f'<div class="scrollable-log">{log_html}</div>', unsafe_allow_html=True)
 
 with tab3:
@@ -285,5 +260,6 @@ with tab3:
     else:
         st.info("พอร์ตปัจจุบันอยู่ในสถานะถือเงินสด (FLAT) พร้อมรอสัญญาณเทรดตามระบบ Risk 1-2%")
 
+# --- Auto Refresh ทุก 30 วินาที ---
 time.sleep(30)
 st.rerun()
