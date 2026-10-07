@@ -81,7 +81,7 @@ st.markdown("""
 
 DB_FILE = "positions.db"
 WATCHLIST_FILE = "watchlist.txt"
-INITIAL_CAPITAL = 1000.00  # ทุนเริ่มต้นตั้งต้น
+INITIAL_CAPITAL = 1000.00  # ทุนตั้งต้นอ้างอิงเริ่มต้น
 
 def load_watchlist_from_file():
     if os.path.exists(WATCHLIST_FILE):
@@ -133,6 +133,16 @@ def get_db_account_capital():
     except:
         return 1000.00
 
+def update_db_account_capital(new_capital):
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("UPDATE account_info SET cash_balance = ?, net_liquidation = ? WHERE id = 1", (new_capital, new_capital))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error updating capital: {e}")
+
 def get_all_positions():
     if not os.path.exists(DB_FILE):
         return pd.DataFrame()
@@ -180,7 +190,15 @@ def fetch_live_market_data(symbols):
 # --- Sidebar ควบคุมระบบ ---
 st.sidebar.markdown("### 🎛️ Terminal Control Center")
 current_capital = get_db_account_capital()
-account_capital = st.sidebar.number_input("Account Capital ($) [Webull Live]", value=float(current_capital), step=100.0)
+
+# ช่องกรอกปรับยอดเงิน และพอมันเปลี่ยน จะบันทึกลง database ทันที
+new_capital_input = st.sidebar.number_input("Account Capital ($) [Webull Live]", value=float(current_capital), step=100.0)
+if new_capital_input != current_capital:
+    update_db_account_capital(new_capital_input)
+    current_capital = new_capital_input
+    st.sidebar.success("✅ บันทึกยอดเงินใหม่ลงฐานข้อมูลแล้ว!")
+
+account_capital = current_capital
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📡 Watchlist File")
@@ -250,7 +268,7 @@ with tab1:
     st.subheader("💼 รายชื่อหุ้นและสินทรัพย์ในพอร์ต (`Positions.db`)")
     df_all_pos = get_all_positions()
     if not df_all_pos.empty:
-        st.dataframe(df_all_pos, use_container_width=True)
+        st.dataframe(df_all_pos, width='stretch')
     else:
         st.warning("⚠️ ไม่พบข้อมูลตาราง positions ในฐานข้อมูล Positions.db")
         st.info("💡 พอร์ตปัจจุบันอยู่ในสถานะถือเงินสด (FLAT) ไม่มีหุ้นค้างในพอร์ต พร้อมรอสัญญาณเทรดตามระบบ Risk 1-2%")
@@ -259,7 +277,7 @@ with tab2:
     st.subheader("📈 ตารางราคาหุ้นเรียลไทม์จาก Watchlist")
     with st.spinner("กำลังดึงราคาตลาด..."):
         df_prices = fetch_live_market_data(WATCHLIST)
-    st.dataframe(df_prices, use_container_width=True)
+    st.dataframe(df_prices, width='stretch')
 
 with tab3:
     st.subheader("🔍 Auto-Scanner & Live Feed Logs")
